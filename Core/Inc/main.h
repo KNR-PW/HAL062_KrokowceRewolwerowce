@@ -69,6 +69,8 @@ void Error_Handler(void);
 #define OSC_OUT_GPIO_Port GPIOF
 #define LD1_Pin GPIO_PIN_5
 #define LD1_GPIO_Port GPIOA
+#define EN_Pin GPIO_PIN_9
+#define EN_GPIO_Port GPIOA
 #define Ystep_Pin GPIO_PIN_7
 #define Ystep_GPIO_Port GPIOC
 #define Xstep_Pin GPIO_PIN_10
