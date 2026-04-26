@@ -77,10 +77,16 @@ void Error_Handler(void);
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
 #define SWCLK_GPIO_Port GPIOA
+#define Yendstop_Pin GPIO_PIN_15
+#define Yendstop_GPIO_Port GPIOA
+#define Yendstop_EXTI_IRQn EXTI4_15_IRQn
 #define Ydir_Pin GPIO_PIN_8
 #define Ydir_GPIO_Port GPIOC
 #define LD2_Pin GPIO_PIN_9
 #define LD2_GPIO_Port GPIOC
+#define Xendstop_Pin GPIO_PIN_3
+#define Xendstop_GPIO_Port GPIOB
+#define Xendstop_EXTI_IRQn EXTI2_3_IRQn
 #define Xdir_Pin GPIO_PIN_4
 #define Xdir_GPIO_Port GPIOB
 

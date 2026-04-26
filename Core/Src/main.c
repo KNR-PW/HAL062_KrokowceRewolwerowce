@@ -21,6 +21,7 @@
 #include "fdcan.h"
 #include "tim.h"
 #include "gpio.h"
+#include <stdint.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -51,8 +52,15 @@ volatile int Xsteps = 0;
 volatile int Ysteps = 0;
 volatile int Xupdate = 0;
 volatile int Yupdate = 0;
+
+volatile uint8_t Xhomed = 0;
+volatile uint8_t Yhomed = 0;
+
 int q = 0;
 const int defaultPeriod = 80;
+FDCAN_RxHeaderTypeDef RxHeader;
+uint8_t RxData[8];
+volatile int incomingMessage = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,6 +97,7 @@ void moveX(int steps, int stepPeriod)//step period podawany w 1/10 ms
   }
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3,  stepPeriod/2-1);
   __HAL_TIM_SET_AUTORELOAD(&htim1, stepPeriod-1);
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
   HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3);
 }
@@ -115,6 +124,7 @@ void moveY(int steps, int stepPeriod)//step period podawany w 1/50 ms
   }
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2,  stepPeriod/2-1);
   __HAL_TIM_SET_AUTORELOAD(&htim3, stepPeriod-1);
+  __HAL_TIM_SET_COUNTER(&htim15, 0);
   HAL_TIM_Base_Start_IT(&htim15);
   HAL_TIM_PWM_Start_IT(&htim3, TIM_CHANNEL_2);
 }
@@ -190,7 +200,7 @@ HAL_FDCAN_Start(&hfdcan1);
 uint8_t TxData[8] = {1,2,3,4,5,6,7,8};
 
 // konfiguracja nagłówka
-TxHeader.Identifier = 0x123;
+TxHeader.Identifier = 0x099;
 TxHeader.IdType = FDCAN_STANDARD_ID;
 TxHeader.TxFrameType = FDCAN_DATA_FRAME;
 TxHeader.DataLength = FDCAN_DLC_BYTES_8;
@@ -200,6 +210,7 @@ TxHeader.FDFormat = FDCAN_CLASSIC_CAN;    // nie CAN FD
 TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
 TxHeader.MessageMarker = 0;
 
+  
   HAL_GPIO_WritePin(Xdir_GPIO_Port, Xdir_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(Ydir_GPIO_Port, Ydir_Pin, GPIO_PIN_RESET);
 
@@ -209,49 +220,21 @@ TxHeader.MessageMarker = 0;
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) > 0)
-  {
-      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+  //   if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) > 0)
+  // {
+  //     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-      HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData);
-      HAL_Delay(1);
-  }
+  //     HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData);
+  //     HAL_Delay(1);
+  // }
   //HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData);
+      if(incomingMessage == 1)
+      {
+        HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData);
+        incomingMessage = 0;
 
-  HAL_Delay(1000);
-    /*
-    if(Xready == 1&&Yready==1)
-    {
-      HAL_Delay(1000);
-      switch(q)
-      {
-        case 0:
-        {
-          moveX(400, 50);
-          moveY(400, 50);
-          break;
-        }
-        case 1:
-        {
-          moveX(400, 10);
-          moveY(-600, 10);
-          break;
-        }
-        case 2:
-        {
-          moveX(400, 25);
-          moveY(200, 25);
-          break;
-        }
+
       }
-      q++;
-      if(q == 3)
-      {
-        q = 0;
-      }   
-    }
-      */
-    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -298,6 +281,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+//Obsługa zakończenia ruchu silnika
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim == &htim2) {
@@ -315,20 +299,34 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     Yready = 1;
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
   }
-  
+//Obsługa zderzeń z krańcówkami
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == Xendstop_Pin)
+  {
+    HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_3);
+    HAL_TIM_Base_Stop_IT(&htim2);
+    Xsteps=0;
+    Xupdate = 0;
+    Xready = 1;
+  }
+  else if(GPIO_Pin == Yendstop_Pin)
+  {
+    HAL_TIM_PWM_Stop_IT(&htim3, TIM_CHANNEL_2);
+    HAL_TIM_Base_Stop_IT(&htim15);
+    Ysteps=0;
+    Yupdate = 0;
+    Yready = 1;
+  }
+}
 }
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
     if (RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE)
     {
-        FDCAN_RxHeaderTypeDef RxHeader;
-        uint8_t RxData[8];
+        incomingMessage = 1;
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-
-        HAL_FDCAN_GetRxMessage(hfdcan,
-            FDCAN_RX_FIFO0,
-            &RxHeader,
-            RxData);
     }
     HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
 }
