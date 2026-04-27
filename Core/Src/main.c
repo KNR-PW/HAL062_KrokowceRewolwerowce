@@ -61,6 +61,8 @@ volatile int16_t Yupdate = 0;
 volatile uint8_t Xhomed = 0;
 volatile uint8_t Yhomed = 0;
 
+volatile uint8_t enState = 1;
+
 volatile int sendPosFlag = 0;
 int q = 0;
 const int defaultPeriod = 80;
@@ -151,6 +153,8 @@ void moveY(int steps, int stepPeriod)//step period podawany w 1/50 ms
   HAL_TIM_PWM_Start_IT(&htim3, TIM_CHANNEL_2);
 }
 
+
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -231,14 +235,14 @@ int main(void)
   //Początkowe nastawy kierunków
   HAL_GPIO_WritePin(Xdir_GPIO_Port, Xdir_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(Ydir_GPIO_Port, Ydir_Pin, GPIO_PIN_RESET);
-  
+  HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+      
 
       if(incomingMessage == 1)
       {
@@ -262,8 +266,27 @@ int main(void)
             sendPosition(0x99);
             break;
           }
+          case 0x90:
+          {
+            enState = 0;
+            HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_SET);
+            sendPosition(0x90);
+            break;
+          }
+          case 0x91:
+          {
+            enState = 1;
+            HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET);
+            sendPosition(0x91);
+            break;
+          }
           case 0x11://Przesuń silnikiem X na określoną pozycję
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             int16_t recievedTargetPosition= (int16_t)((RxData[1] << 8) | RxData[2]);
             int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
             moveX(recievedTargetPosition-Xsteps, recievedStepPeriod);
@@ -272,6 +295,11 @@ int main(void)
           }
           case 0x21://Przesuń silnikiem Y na określoną pozycję
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             int16_t recievedTargetPosition= (int16_t)((RxData[1] << 8) | RxData[2]);
             int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
             moveY(recievedTargetPosition-Ysteps, recievedStepPeriod);
@@ -280,6 +308,11 @@ int main(void)
           }
           case 0x12://Przesuń X o określoną ilość kroków
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             int16_t recievedTargetPosition= (int16_t)((RxData[1] << 8) | RxData[2]);
             int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
             moveX(recievedTargetPosition, recievedStepPeriod);
@@ -288,6 +321,11 @@ int main(void)
           }
           case 0x22://Przesuń Y o określoną ilość kroków
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             int16_t recievedTargetPosition= (int16_t)((RxData[1] << 8) | RxData[2]);
             int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
             moveY(recievedTargetPosition, recievedStepPeriod);
@@ -296,18 +334,33 @@ int main(void)
           }
           case 0x13://home X
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             moveX(200*16, 300);
             sendPosFlag = 1;
             break;
           }
           case 0x23://home Y
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             moveY(200*16, 300);
             sendPosFlag = 1;
             break;
           }
           case 0x00://zapytaj o pozycję
           {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
             sendPosition(0x01);//OK
             break;
           }
