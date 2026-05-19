@@ -51,20 +51,22 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+//Zmienne pozycyjne
 volatile uint8_t Xready = 1;
 volatile uint8_t Yready = 1;
-volatile int16_t Xsteps = 0;//overflow przy 3 obrotach z rzędu, ale w labo nie jest możliwy pełen obrót
+volatile int16_t Xsteps = 0;
 volatile int16_t Ysteps = 0;
 volatile int16_t Xupdate = 0;
 volatile int16_t Yupdate = 0;
 
 volatile uint8_t Xhomed = 0;
 volatile uint8_t Yhomed = 0;
-
+//Zmienna enable, defaultowo silniki włączone
 volatile uint8_t enState = 1;
 
 volatile int sendPosFlag = 0;
 volatile int xEndstopEn = 0, yEndstopEn = 0;
+//Tu wpisz pozycje strzykawek i probówek po zmierzeniu
 int pozStrzykawek[5] = {0,0,0,0,0};
 int pozProbowek[7] = {0,0,0,0,0,0,0};
 int q = 0;
@@ -88,12 +90,8 @@ int absol(int fk)//wartość bezwzględna
   return fk;
 }
 uint8_t sendPosition(uint8_t pierwszy);
-void errorFunction(void)
-{
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);//indicator błędu
-  return;
-}
-void moveX(int steps, int stepPeriod)//step period podawany w 1/50 ms
+
+void moveX(int steps, int stepPeriod)//step period podawany w 1/100 ms
 {
   if(Xready == 0||steps == 0)
   {
@@ -124,7 +122,7 @@ void moveX(int steps, int stepPeriod)//step period podawany w 1/50 ms
   HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3);
 }
-void moveY(int steps, int stepPeriod)//step period podawany w 1/50 ms
+void moveY(int steps, int stepPeriod)//step period podawany w 1/100 ms
 {
   if(Yready == 0||steps == 0)
   {
@@ -212,7 +210,7 @@ int main(void)
   sFilterConfig.FilterID2 = 0x7FF;
   if (HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK)
   {
-    errorFunction();
+
   }
   HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
   FDCAN_ACCEPT_IN_RX_FIFO0,
@@ -254,7 +252,7 @@ int main(void)
         uint8_t komenda = RxData[0];//Pierwsza cyfra zawsze 1 (silnik X) lub 2 (silnik Y)
         switch(komenda)
         {
-          case 0x99://Awaryjny stop silników
+          case 0x99://Awaryjny stop silników. Updatuje pozycje silników w momencie zatrzymania.
           {
             HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_3);
             HAL_TIM_Base_Stop_IT(&htim2);
@@ -269,14 +267,14 @@ int main(void)
             sendPosition(0x99);
             break;
           }
-          case 0x90:
+          case 0x90://Wyłącz silniki (ENABLE = HIGH)
           {
             enState = 0;
             HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_SET);
             sendPosition(0x90);
             break;
           }
-          case 0x91:
+          case 0x91://Włącz silniki (ENABLE = LOW) Silniki początkowo włączone
           {
             enState = 1;
             HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET);
@@ -364,7 +362,7 @@ int main(void)
             int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
             if(poz < 0 || poz > sizeof(pozStrzykawek)/sizeof(pozStrzykawek[0]))
             {
-              sendPosition(0x13);
+              sendPosition(0x23);
               break;
             }
             moveX(pozStrzykawek[poz]-Xsteps, recievedStepPeriod);
@@ -378,7 +376,7 @@ int main(void)
               sendPosition(0x90);
               break;
             }
-            xEndstopEn = 1;
+            xEndstopEn = 1;//Włąćzenie krańcówki
             moveX(200*16, 300);
             sendPosFlag = 1;
             break;
@@ -390,7 +388,7 @@ int main(void)
               sendPosition(0x90);
               break;
             }
-            yEndstopEn = 1;
+            yEndstopEn = 1;//Włąćzenie krańcówki
             moveY(200*16, 300);
             sendPosFlag = 1;
             break;
@@ -403,6 +401,11 @@ int main(void)
               break;
             }
             sendPosition(0x01);//OK
+            break;
+          }
+          default://niepoprawna instrukcja
+          {
+            sendPosition(0x02);
             break;
           }
 
@@ -487,7 +490,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
   {
     HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_3);
     HAL_TIM_Base_Stop_IT(&htim2);
-    xEndstopEn = 0;
+    xEndstopEn = 0;//Wyłączanie krańcówki
     Xsteps = 0;
     Xupdate = 0;
     Xready = 1;
@@ -496,7 +499,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
   {
     HAL_TIM_PWM_Stop_IT(&htim3, TIM_CHANNEL_2);
     HAL_TIM_Base_Stop_IT(&htim15);
-    yEndstopEn = 0;
+    yEndstopEn = 0;//Wyłączanie krańcówki
     Ysteps=0;
     Yupdate = 0;
     Yready = 1;
@@ -510,7 +513,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     }
     HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
 }
-uint8_t sendPosition(uint8_t pierwszy)
+uint8_t sendPosition(uint8_t pierwszy)//Wysyłanie ramek pozycyjnych (status, pozX, pozY)
 {
   uint8_t ramka[5];
   TxHeader.DataLength = FDCAN_DLC_BYTES_5;
@@ -521,7 +524,6 @@ uint8_t sendPosition(uint8_t pierwszy)
   ramka[4] = (uint8_t)((Ysteps >> 8) & 0xFF);
   if(HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, ramka)!=HAL_OK)
   {
-    errorFunction();
     return 0;
   }
   return 1;
