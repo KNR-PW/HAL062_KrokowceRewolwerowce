@@ -64,6 +64,9 @@ volatile uint8_t Yhomed = 0;
 volatile uint8_t enState = 1;
 
 volatile int sendPosFlag = 0;
+volatile int xEndstopEn = 0, yEndstopEn = 0;
+int pozStrzykawek[5] = {0,0,0,0,0};
+int pozProbowek[7] = {0,0,0,0,0,0,0};
 int q = 0;
 const int defaultPeriod = 80;
 FDCAN_RxHeaderTypeDef RxHeader;
@@ -332,24 +335,62 @@ int main(void)
             sendPosFlag = 1;
             break;
           }
-          case 0x13://home X
+          case 0x13://przesun X do okreslonej probowki
           {
             if(enState == 0)
             {
               sendPosition(0x90);
               break;
             }
+            int16_t poz = (int16_t)((RxData[1] << 8) | RxData[2]);
+            int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
+            if(poz < 0 || poz > sizeof(pozProbowek)/sizeof(pozProbowek[0]))
+            {
+              sendPosition(0x13);
+              break;
+            }
+            moveX(pozProbowek[poz]-Xsteps, recievedStepPeriod);
+            sendPosFlag = 1;
+            break;
+          }
+          case 0x23://przesun Y do okreslonej strzykawki
+          {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
+            int16_t poz = (int16_t)((RxData[1] << 8) | RxData[2]);
+            int16_t recievedStepPeriod= (int16_t)((RxData[3] << 8) | RxData[4]);
+            if(poz < 0 || poz > sizeof(pozStrzykawek)/sizeof(pozStrzykawek[0]))
+            {
+              sendPosition(0x13);
+              break;
+            }
+            moveX(pozStrzykawek[poz]-Xsteps, recievedStepPeriod);
+            sendPosFlag = 1;
+            break;
+          }
+          case 0x18://home X
+          {
+            if(enState == 0)
+            {
+              sendPosition(0x90);
+              break;
+            }
+            xEndstopEn = 1;
             moveX(200*16, 300);
             sendPosFlag = 1;
             break;
           }
-          case 0x23://home Y
+          case 0x28://home Y
           {
             if(enState == 0)
             {
               sendPosition(0x90);
               break;
             }
+            yEndstopEn = 1;
             moveY(200*16, 300);
             sendPosFlag = 1;
             break;
@@ -442,19 +483,20 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 //Obsługa zderzeń z krańcówkami
 void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
 {
-  HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-  if (GPIO_Pin == Xendstop_Pin)
+  if (GPIO_Pin == Xendstop_Pin&&xEndstopEn==1)
   {
     HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_3);
     HAL_TIM_Base_Stop_IT(&htim2);
+    xEndstopEn = 0;
     Xsteps = 0;
     Xupdate = 0;
     Xready = 1;
   }
-  else if(GPIO_Pin == Yendstop_Pin)
+  else if(GPIO_Pin == Yendstop_Pin&&yEndstopEn==1)
   {
     HAL_TIM_PWM_Stop_IT(&htim3, TIM_CHANNEL_2);
     HAL_TIM_Base_Stop_IT(&htim15);
+    yEndstopEn = 0;
     Ysteps=0;
     Yupdate = 0;
     Yready = 1;
