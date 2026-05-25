@@ -12,7 +12,7 @@
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  *Aby tim
   ******************************************************************************
   */
 
@@ -24,13 +24,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "crc.h"
 #include "fdcan.h"
 #include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -76,6 +78,15 @@ FDCAN_TxHeaderTypeDef TxHeader;
 
 uint8_t RxData[8];
 volatile int incomingMessage = 0;
+
+uint8_t modbus_req[8] = {0xFE, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00};
+uint8_t modbus_res[9] = {0};
+
+volatile bool measurement_ready = false;
+volatile bool trigger_measurement = true;
+
+volatile float humidity = 0.0f;
+volatile float temperature = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -160,7 +171,22 @@ void moveY(int steps, int stepPeriod)//step period podawany w 1/100 ms
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint16_t Calculate_Hardware_CRC(uint8_t *data, uint16_t length) {
+    __HAL_CRC_DR_RESET(&hcrc); // Reset CRC calculator to 0xFFFF
 
+    for (uint16_t i = 0; i < length; i++) {
+        // Feed data byte by byte to the CRC Data Register
+        *(__IO uint8_t *)(__IO void *)(&hcrc.Instance->DR) = data[i];
+    }
+    return (uint16_t)hcrc.Instance->DR;
+}
+
+// UART Receive Complete Callback (Triggered automatically by hardware)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        measurement_ready = true; // Set flag for the main loop
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -197,6 +223,9 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM15_Init();
   MX_FDCAN1_Init();
+  MX_USART1_UART_Init();
+  MX_CRC_Init();
+  MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
   //zgaś indicator błędu
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -237,13 +266,41 @@ int main(void)
   HAL_GPIO_WritePin(Xdir_GPIO_Port, Xdir_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(Ydir_GPIO_Port, Ydir_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET);
+
+  // Calculate CRC for the request frame only once before the loop
+  uint16_t crc = Calculate_Hardware_CRC(modbus_req, 6);
+  modbus_req[6] = crc & 0xFF;
+  modbus_req[7] = (crc >> 8) & 0xFF;
+
+  HAL_TIM_Base_Start_IT(&htim17);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      
+      // 1. ZLECENIE POMIARU (Flaga ustawiona w tle przez TIM17)
+      if (trigger_measurement) {
+          trigger_measurement = false; // Opuszczamy flagę
+
+          // Zlecamy komunikację w tle
+          HAL_UART_Receive_IT(&huart1, modbus_res, 9);
+          HAL_UART_Transmit_IT(&huart1, modbus_req, 8);
+      }
+
+      // 2. PARSOWANIE DANYCH (Flaga ustawiona w tle przez UART RX)
+      if (measurement_ready) {
+          measurement_ready = false; 
+
+          if (modbus_res[0] == 0xFE && modbus_res[1] == 0x03) {
+
+              uint16_t raw_humidity = (modbus_res[3] << 8) | modbus_res[4];
+              humidity = raw_humidity / 10.0f;
+
+              int16_t raw_temperature = (int16_t)((modbus_res[5] << 8) | modbus_res[6]);
+              temperature = raw_temperature / 10.0f;
+          }
+      }
 
       if(incomingMessage == 1)
       {
@@ -402,7 +459,7 @@ int main(void)
             }
             sendPosition(0x01);//OK
             break;
-          }
+          }HAL_TIM_Base_Start_IT(&htim17);
           default://niepoprawna instrukcja
           {
             sendPosition(0x02);
@@ -482,6 +539,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     Yready = 1;
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
   }
+  if (htim->Instance == TIM17) {
+        trigger_measurement = true; // Dajemy znak pętli głównej: Czas na pomiar!
+    }
 }
 //Obsługa zderzeń z krańcówkami
 void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
